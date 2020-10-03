@@ -11,7 +11,7 @@ for server in isu02; do
   ssh -t $server "mysql xsuportal < /home/isucon/webapp/sql/schema.sql"
 done
 
-for server in isu01 isu02 isuco03; do
+for server in isu01 isu02 isu03; do
   ssh -t $server "sudo systemctl stop xsuportal-web-golang.service"
   ssh -t $server "sudo systemctl stop xsuportal-api-golang.service"
   scp bin/xsuportal $server:/home/isucon/webapp/golang/bin/
