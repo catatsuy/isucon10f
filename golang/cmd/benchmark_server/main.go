@@ -254,7 +254,7 @@ func pollBenchmarkJob(db sqlx.Queryer) (*xsuportal.BenchmarkJob, error) {
 		err := sqlx.Get(
 			db,
 			&job,
-			"SELECT * FROM `benchmark_jobs` WHERE `status` = ? ORDER BY `id` LIMIT 1",
+			"SELECT * FROM `benchmark_jobs` FORCE INDEX(PRIMARY) WHERE `status` = ? ORDER BY `id` LIMIT 1",
 			resources.BenchmarkJob_PENDING,
 		)
 		if err == sql.ErrNoRows {
