@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 90
+	TeamCapacity               = 80
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -1496,7 +1496,7 @@ func makeLeaderboardPB(e echo.Context, teamID int64) (*resourcespb.Leaderboard, 
 		"      (\n" +
 		"        SELECT\n" +
 		"          `team_id`,\n" +
-		"          MAX(`score_raw` - `score_deduction`) AS `score`\n" +
+		"          MAX(`score`) AS `score`\n" +
 		"        FROM\n" +
 		"          `benchmark_jobs`\n" +
 		"        WHERE\n" +
@@ -1506,7 +1506,7 @@ func makeLeaderboardPB(e echo.Context, teamID int64) (*resourcespb.Leaderboard, 
 		"        GROUP BY\n" +
 		"          `team_id`\n" +
 		"      ) `best_scores`\n" +
-		"      LEFT JOIN `benchmark_jobs` `j` ON (`j`.`score_raw` - `j`.`score_deduction`) = `best_scores`.`score`\n" +
+		"      LEFT JOIN `benchmark_jobs` `j` ON `j`.`score` = `best_scores`.`score`\n" +
 		"        AND `j`.`team_id` = `best_scores`.`team_id`\n" +
 		"    GROUP BY\n" +
 		"      `j`.`team_id`\n" +
@@ -1531,7 +1531,7 @@ func makeLeaderboardPB(e echo.Context, teamID int64) (*resourcespb.Leaderboard, 
 	}
 	jobResultsQuery := "SELECT\n" +
 		"  `team_id` AS `team_id`,\n" +
-		"  (`score_raw` - `score_deduction`) AS `score`,\n" +
+		"  `score`,\n" +
 		"  `started_at` AS `started_at`,\n" +
 		"  `finished_at` AS `finished_at`\n" +
 		"FROM\n" +
