@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	TeamCapacity               = 10
+	TeamCapacity               = 90
 	AdminID                    = "admin"
 	AdminPassword              = "admin"
 	DebugContestStatusFilePath = "/tmp/XSUPORTAL_CONTEST_STATUS"
@@ -1189,6 +1189,7 @@ func (*AudienceService) Dashboard(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("make leaderboard: %w", err)
 	}
+	e.Response().Header().Set("Cache-Control", "max-age=1")
 	return writeProto(e, http.StatusOK, &audiencepb.DashboardResponse{
 		Leaderboard: leaderboard,
 	})
