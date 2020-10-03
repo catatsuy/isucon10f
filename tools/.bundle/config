@@ -1,2 +1,4 @@
 ---
 BUNDLE_JOBS: "20"
+BUNDLE_PATH: "vendor/bundle"
+BUNDLE_BUILD__MYSQL2: "--with-ldflags=-L/usr/local/opt/openssl/lib"
