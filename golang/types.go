@@ -72,6 +72,7 @@ type BenchmarkJob struct {
 	FinishedAt     sql.NullTime   `db:"finished_at"`
 	CreatedAt      time.Time      `db:"created_at"`
 	UpdatedAt      time.Time      `db:"updated_at"`
+	Score          sql.NullString `db:"score"`
 }
 
 type Notification struct {
