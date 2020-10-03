@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -51,7 +52,7 @@ var notifier xsuportal.Notifier
 
 type cacheDashboard struct {
 	// Setが多いならsync.Mutex
-	sync.RWMutex
+	sync.Mutex
 	items map[string]dashboardContent
 }
 
@@ -90,6 +91,52 @@ func (c *cacheDashboard) Get(key string) (*resourcespb.Leaderboard, bool) {
 
 var dashboardCache = NewCacheDashboard()
 
+type cacheContestant struct {
+	sync.RWMutex
+	items map[string]*xsuportal.Contestant
+}
+
+func NewCacheContestant() *cacheContestant {
+	m := make(map[string]*xsuportal.Contestant)
+	c := &cacheContestant{
+		items: m,
+	}
+	return c
+}
+
+func (c *cacheContestant) Clear() {
+	c.Lock()
+	c.items = make(map[string]*xsuportal.Contestant)
+	c.Unlock()
+}
+
+func (c *cacheContestant) Set(key string, value *xsuportal.Contestant) {
+	c.Lock()
+	c.items[key] = value
+	c.Unlock()
+}
+
+func (c *cacheContestant) Update(key string, name string, student bool, teamID int64) {
+	c.Lock()
+	tmp := c.items[key]
+	tmp.Name = sql.NullString{String: name, Valid: true}
+	tmp.Student = student
+	if teamID != 0 {
+		tmp.TeamID = sql.NullInt64{Int64: teamID, Valid: true}
+	}
+	c.items[key] = tmp
+	c.Unlock()
+}
+
+func (c *cacheContestant) Get(key string) (*xsuportal.Contestant, bool) {
+	c.RLock()
+	defer c.RUnlock()
+	v, found := c.items[key]
+	return v, found
+}
+
+var contestantCache = NewCacheContestant()
+
 func init() {
 	rand.Seed(time.Now().Unix())
 }
@@ -121,6 +168,26 @@ func main() {
 		srv.Use(middleware.Recover())
 	}
 	srv.Use(session.Middleware(sessions.NewCookieStore([]byte("tagomoris"))))
+
+	for {
+		err := db.Ping()
+		if err == nil {
+			break
+		}
+		log.Print(err)
+		time.Sleep(time.Second * 2)
+	}
+	log.Print("DB ready!")
+
+	members := make([]xsuportal.Contestant, 0, 100)
+	_ = db.Select(
+		&members,
+		"SELECT * FROM `contestants`",
+	)
+
+	for _, m := range members {
+		contestantCache.Set(m.ID, &m)
+	}
 
 	srv.File("/", "public/audience.html")
 	srv.File("/registration", "public/audience.html")
@@ -214,12 +281,21 @@ func (*AdminService) Initialize(e echo.Context) error {
 		}
 	}
 
+	contestantCache.Clear()
+
 	passwordHash := sha256.Sum256([]byte(AdminPassword))
 	digest := hex.EncodeToString(passwordHash[:])
 	_, err := db.Exec("INSERT `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, TRUE, NOW(6))", AdminID, digest)
 	if err != nil {
 		return fmt.Errorf("insert initial contestant: %w", err)
 	}
+
+	contestantCache.Set(AdminID, &xsuportal.Contestant{
+		ID:        AdminID,
+		Password:  digest,
+		Staff:     true,
+		CreatedAt: time.Now(),
+	})
 
 	if req.Contest != nil {
 		_, err := db.Exec(
@@ -753,10 +829,11 @@ func (*ContestantService) Signup(e echo.Context) error {
 	}
 
 	hash := sha256.Sum256([]byte(req.Password))
+	passHash := hex.EncodeToString(hash[:])
 	_, err := db.Exec(
 		"INSERT INTO `contestants` (`id`, `password`, `staff`, `created_at`) VALUES (?, ?, FALSE, NOW(6))",
 		req.ContestantId,
-		hex.EncodeToString(hash[:]),
+		passHash,
 	)
 	if mErr, ok := err.(*mysql.MySQLError); ok && mErr.Number == MYSQL_ER_DUP_ENTRY {
 		return halt(e, http.StatusBadRequest, "IDが既に登録されています", nil)
@@ -764,6 +841,12 @@ func (*ContestantService) Signup(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("insert contestant: %w", err)
 	}
+	contestantCache.Set(req.ContestantId, &xsuportal.Contestant{
+		ID:        req.ContestantId,
+		Password:  passHash,
+		Staff:     false,
+		CreatedAt: time.Now(),
+	})
 	sess, err := session.Get(SessionName, e)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -988,6 +1071,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
 	}
+	contestantCache.Update(contestant.ID, req.Name, req.IsStudent, teamID)
 
 	_, err = conn.ExecContext(
 		ctx,
@@ -1099,6 +1183,7 @@ func (*RegistrationService) UpdateRegistration(e echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("update contestant: %w", err)
 	}
+	contestantCache.Update(contestant.ID, req.Name, req.IsStudent, 0)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
@@ -1223,6 +1308,14 @@ func getCurrentContestant(e echo.Context, db sqlx.Queryer, lock bool) (*xsuporta
 		return nil, nil
 	}
 	var contestant xsuportal.Contestant
+
+	if !lock {
+		contestant, ok := contestantCache.Get(contestantID.(string))
+		if ok {
+			xc.Contestant = contestant
+			return xc.Contestant, nil
+		}
+	}
 	query := "SELECT * FROM `contestants` WHERE `id` = ? LIMIT 1"
 	if lock {
 		query += " FOR UPDATE"
