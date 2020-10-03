@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -46,6 +47,47 @@ const (
 
 var db *sqlx.DB
 var notifier xsuportal.Notifier
+
+type cacheDashboard struct {
+	// Setが多いならsync.Mutex
+	sync.RWMutex
+	items map[string]dashboardContent
+}
+
+type dashboardContent struct {
+	expired time.Time
+	value   *resourcespb.Leaderboard
+}
+
+func NewCacheDashboard() *cacheDashboard {
+	m := make(map[string]dashboardContent)
+	c := &cacheDashboard{
+		items: m,
+	}
+	return c
+}
+
+func (c *cacheDashboard) Set(key string, value *resourcespb.Leaderboard) {
+	c.Lock()
+	c.items[key] = dashboardContent{
+		value:   value,
+		expired: time.Now().Add(time.Second),
+	}
+	c.Unlock()
+}
+
+func (c *cacheDashboard) Get(key string) (*resourcespb.Leaderboard, bool) {
+	c.Lock()
+	defer c.Unlock()
+	v, found := c.items[key]
+	if found && time.Now().After(v.expired) {
+		delete(c.items, key)
+		return nil, false
+	}
+	return v.value, found
+}
+
+var dashboardCache = NewCacheDashboard()
 
 func main() {
 	srv := echo.New()
@@ -1387,6 +1429,12 @@ func makeLeaderboardPB(e echo.Context, teamID int64) (*resourcespb.Leaderboard, 
 	contestFinished := contestStatus.Status == resourcespb.Contest_FINISHED
 	contestFreezesAt := contestStatus.ContestFreezesAt
 
+	cacheKey := fmt.Sprintf("%d, %t, %s", teamID, contestFinished, contestFreezesAt)
+	v, ok := dashboardCache.Get(cacheKey)
+	if ok {
+		return v, nil
+	}
+
 	tx, err := db.Beginx()
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -1523,6 +1571,7 @@ func makeLeaderboardPB(e echo.Context, teamID int64) (*resourcespb.Leaderboard, 
 		}
 		pb.Teams = append(pb.Teams, item)
 	}
+	dashboardCache.Set(cacheKey, pb)
 	return pb, nil
 }
 
