@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -88,6 +89,10 @@ func (c *cacheDashboard) Get(key string) (*resourcespb.Leaderboard, bool) {
 }
 
 var dashboardCache = NewCacheDashboard()
+
+func init() {
+	rand.Seed(time.Now().Unix())
+}
 
 func main() {
 	srv := echo.New()
@@ -932,7 +937,7 @@ func (*RegistrationService) CreateTeam(e echo.Context) error {
 	defer conn.ExecContext(ctx, "UNLOCK TABLES")
 
 	randomBytes := make([]byte, 64)
-	_, err = rand.Read(randomBytes)
+	_, err = crand.Read(randomBytes)
 	if err != nil {
 		return fmt.Errorf("read random: %w", err)
 	}
